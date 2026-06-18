@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Card,
   Row,
@@ -86,9 +86,15 @@ export default function EvidenceExport() {
     'overview', 'abnormalAnalysis', 'unitAnalysis', 'riskClues', 'evidenceChains', 'suggestions'
   ]);
   const [exportFormat, setExportFormat] = useState<'excel' | 'pdf' | 'zip'>('excel');
+  const [filteredRecords, setFilteredRecords] = useState<any[]>([]);
 
-  // 监听表单 format 变化，同步到状态
+  // 监听表单 format 变化，实时同步到状态（无需重新生成摘要）
   const formatWatch = Form.useWatch('format', generateForm);
+  useEffect(() => {
+    if (formatWatch && formatWatch !== exportFormat) {
+      setExportFormat(formatWatch);
+    }
+  }, [formatWatch, exportFormat]);
 
   const generateSummary = (values: any) => {
     const startDate = values.dateRange ? values.dateRange[0].format('YYYY-MM-DD') : '2026-05-01';
@@ -244,6 +250,8 @@ export default function EvidenceExport() {
       relatedChains: chainsInRange,
       suggestions
     });
+    // 保存过滤后的调证记录，供ZIP导出使用（严格按所选单位+审计期间）
+    setFilteredRecords(recordsInRange);
   };
 
   const exportColumns: any[] = useMemo(() => {
@@ -357,21 +365,10 @@ export default function EvidenceExport() {
         ];
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(readme), '00_说明');
 
-        // 2. 调证记录明细（全量）
-        const detailRecords = (window as any).__filteredRecords || [];
+        // 2. 调证记录明细（严格按选中单位 + 审计期间过滤）
+        const zipDetailRecords = filteredRecords.length > 0 ? filteredRecords : callRecords.slice(0, 5000);
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
-          (summary.relatedClues?.length > 0
-            ? callRecords.filter(cr => {
-                const callDate = cr.callTime.split(' ')[0];
-                const [s, e] = summary.period.split(' 至 ');
-                if (callDate < s || callDate > e) return false;
-                if (summary.scopeUnits?.length) {
-                  return summary.scopeUnits.some((su: any) => su.id === cr.unitId);
-                }
-                return true;
-              })
-            : callRecords
-          ).slice(0, 5000).map(r => ({
+          zipDetailRecords.slice(0, 5000).map(r => ({
             '记录ID': r.id,
             '调用时间': r.callTime,
             '单位': r.unitName,

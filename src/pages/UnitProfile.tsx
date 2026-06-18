@@ -78,20 +78,34 @@ export default function UnitProfile() {
 
   const selectedUnit = units.find(u => u.id === selectedUnitId);
   const selectedMetrics = unitComplianceMetrics.find(m => m.unitId === selectedUnitId);
+  // 从 sortedUnits 中取同一口径的合规率和等级（与列表、饼图保持一致）
+  const currentUnitStat = sortedUnits.find(u => u.id === selectedUnitId);
+  const currentComplianceRate = currentUnitStat?.complianceRate ?? selectedUnit?.complianceRate ?? 0;
+  const currentComplianceLevel = currentUnitStat?.complianceLevel ?? selectedMetrics?.complianceLevel ?? 'fair';
 
   const sortedUnits = useMemo(() => {
     const withMetrics = units.map(u => {
       const m = unitComplianceMetrics.find(x => x.unitId === u.id);
+      // 合规率和合规等级统一来自 unitComplianceMetrics（同一口径）
+      const complianceRate = m ? Number(((m.approvalRate + m.resultRate) / 2).toFixed(1)) : u.complianceRate;
+      // 按统一阈值计算等级（与 mockData 的 levelMap 保持一致）
+      let complianceLevel: 'excellent' | 'good' | 'fair' | 'poor' | 'critical' = 'fair';
+      if (complianceRate >= 95) complianceLevel = 'excellent';
+      else if (complianceRate >= 90) complianceLevel = 'good';
+      else if (complianceRate >= 80) complianceLevel = 'fair';
+      else if (complianceRate >= 70) complianceLevel = 'poor';
+      else complianceLevel = 'critical';
       return {
         ...u,
-        complianceRate: m ? (m.approvalRate + m.resultRate) / 2 : u.complianceRate,
+        complianceRate,
+        complianceLevel,
         abnormalCount: m ? (m.unauthorizedCalls + m.expiredAuthCalls + m.abnormalPatternCount) : u.abnormalCount
       };
     });
     return withMetrics.sort((a, b) => {
       if (sortBy === 'riskScore') return b.riskScore - a.riskScore;
       if (sortBy === 'abnormalCount') return b.abnormalCount - a.abnormalCount;
-      return a.complianceRate - b.complianceRate;
+      return b.complianceRate - a.complianceRate;
     });
   }, [units, unitComplianceMetrics, sortBy]);
 
@@ -251,9 +265,7 @@ export default function UnitProfile() {
       key: 'level',
       width: 100,
       render: (_, r) => {
-        const m = unitComplianceMetrics.find(x => x.unitId === r.id);
-        const l = m?.complianceLevel || 'fair';
-        return <Tag color={levelColor[l]} style={{ margin: 0 }}>{levelText[l]}</Tag>;
+        return <Tag color={levelColor[r.complianceLevel]} style={{ margin: 0 }}>{levelText[r.complianceLevel]}</Tag>;
       }
     },
     {
@@ -364,11 +376,11 @@ export default function UnitProfile() {
           <Card size="small" title={<Space><TeamOutlined style={{ color: '#1677ff' }} /> 单位合规等级分布</Space>}>
             <Pie
               data={[
-                { type: '优秀', value: unitComplianceMetrics.filter(m => m.complianceLevel === 'excellent').length },
-                { type: '良好', value: unitComplianceMetrics.filter(m => m.complianceLevel === 'good').length },
-                { type: '一般', value: unitComplianceMetrics.filter(m => m.complianceLevel === 'fair').length },
-                { type: '较差', value: unitComplianceMetrics.filter(m => m.complianceLevel === 'poor').length },
-                { type: '危险', value: unitComplianceMetrics.filter(m => m.complianceLevel === 'critical').length }
+                { type: '优秀', value: sortedUnits.filter(u => u.complianceLevel === 'excellent').length },
+                { type: '良好', value: sortedUnits.filter(u => u.complianceLevel === 'good').length },
+                { type: '一般', value: sortedUnits.filter(u => u.complianceLevel === 'fair').length },
+                { type: '较差', value: sortedUnits.filter(u => u.complianceLevel === 'poor').length },
+                { type: '危险', value: sortedUnits.filter(u => u.complianceLevel === 'critical').length }
               ]}
               angleField="value"
               colorField="type"
@@ -471,9 +483,9 @@ export default function UnitProfile() {
                     <div>
                       <Space style={{ width: '100%', justifyContent: 'space-between' }}>
                         <Text>综合合规率</Text>
-                        <Text strong style={{ color: '#52c41a', fontSize: 16 }}>{selectedUnit.complianceRate}%</Text>
+                        <Text strong style={{ color: '#52c41a', fontSize: 16 }}>{currentComplianceRate}%</Text>
                       </Space>
-                      <Progress percent={selectedUnit.complianceRate} strokeColor="#52c41a" size={['100%', 16]} />
+                      <Progress percent={currentComplianceRate} strokeColor="#52c41a" size={['100%', 16]} format={(p: number | undefined) => `${p ?? 0}%`} />
                     </div>
                   </Space>
                 </Col>
@@ -482,8 +494,8 @@ export default function UnitProfile() {
                     <div>
                       <Space style={{ width: '100%', justifyContent: 'space-between' }}>
                         <Text>合规等级</Text>
-                        <Tag color={levelColor[selectedMetrics.complianceLevel]} style={{ fontSize: 16, padding: '4px 12px' }}>
-                          {levelText[selectedMetrics.complianceLevel]}
+                        <Tag color={levelColor[currentComplianceLevel]} style={{ fontSize: 16, padding: '4px 12px' }}>
+                          {levelText[currentComplianceLevel]}
                         </Tag>
                       </Space>
                     </div>

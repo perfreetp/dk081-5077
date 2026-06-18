@@ -210,8 +210,8 @@ export default function TimelineTrace() {
         }
         const window = sorted.slice(left, right + 1);
         const unitSet = new Set(window.map(r => r.unitName));
-        // 窗口内部门数 >= 2 或 调用次数 >= 3 视为一组
-        if ((unitSet.size >= 2 || window.length >= 3) && right >= lastGroupedRight + 1) {
+        // 仅窗口内部门数 >= 2（跨部门）才计入，排除同一部门自己多次查询的情况
+        if (unitSet.size >= 2 && right >= lastGroupedRight + 1) {
           const t1 = new Date(window[0].callTime).getTime();
           const t2 = new Date(window[window.length - 1].callTime).getTime();
           groups.push({
