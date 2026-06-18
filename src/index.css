@@ -1,0 +1,86 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: #f0f2f5;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.page-container {
+  padding: 16px;
+  background: #fff;
+  border-radius: 8px;
+  min-height: calc(100vh - 64px - 32px);
+}
+
+.stat-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  height: 100%;
+}
+
+.stat-card-green {
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+}
+
+.stat-card-orange {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.stat-card-blue {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+}
+
+.stat-card-red {
+  background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+}
+
+.risk-high {
+  color: #ff4d4f;
+  font-weight: 600;
+}
+
+.risk-medium {
+  color: #faad14;
+  font-weight: 600;
+}
+
+.risk-low {
+  color: #52c41a;
+  font-weight: 600;
+}
+
+.timeline-item-highlight .ant-timeline-item-content {
+  background: #fff7e6;
+  border-left: 3px solid #faad14;
+  padding-left: 12px;
+  border-radius: 4px;
+}
+
+.evidence-chain {
+  padding: 16px;
+  background: #fafafa;
+  border-radius: 8px;
+  border: 1px solid #e8e8e8;
+}
