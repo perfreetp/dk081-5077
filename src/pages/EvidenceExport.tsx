@@ -87,32 +87,48 @@ export default function EvidenceExport() {
   ]);
   const [exportFormat, setExportFormat] = useState<'excel' | 'pdf' | 'zip'>('excel');
 
+  // 监听表单 format 变化，同步到状态
+  const formatWatch = Form.useWatch('format', generateForm);
+
   const generateSummary = (values: any) => {
     const startDate = values.dateRange ? values.dateRange[0].format('YYYY-MM-DD') : '2026-05-01';
     const endDate = values.dateRange ? values.dateRange[1].format('YYYY-MM-DD') : '2026-06-18';
     setDateRange([startDate, endDate]);
     setSelectedUnitIds(values.unitIds || []);
+    // 同步输出格式
+    if (values.format) {
+      setExportFormat(values.format);
+    }
 
-    const targetUnits = (values.unitIds && values.unitIds.length > 0)
-      ? units.filter(u => values.unitIds.includes(u.id))
+    const targetUnitIds = (values.unitIds && values.unitIds.length > 0) ? values.unitIds as string[] : null;
+    const targetUnits = targetUnitIds
+      ? units.filter(u => targetUnitIds.includes(u.id))
       : units;
 
     const recordsInRange = callRecords.filter(r => {
       const callDate = r.callTime.split(' ')[0];
       if (callDate < startDate || callDate > endDate) return false;
-      if (values.unitIds && values.unitIds.length > 0 && !values.unitIds.includes(r.unitId)) return false;
+      if (targetUnitIds && !targetUnitIds.includes(r.unitId)) return false;
       return true;
     });
 
     const cluesInRange = riskClues.filter(c => {
       const date = c.discoveredTime.split(' ')[0];
-      return date >= startDate && date <= endDate;
+      if (date < startDate || date > endDate) return false;
+      if (targetUnitIds && !targetUnitIds.includes(c.unitId)) return false;
+      return true;
     });
 
     const chainsInRange = evidenceChains.filter(c => {
       const date = c.startTime.split(' ')[0];
-      return date >= startDate && date <= endDate;
+      if (date < startDate || date > endDate) return false;
+      if (targetUnitIds && !targetUnitIds.includes(c.unitId)) return false;
+      return true;
     });
+
+    const targetPersonnelIds = targetUnitIds
+      ? personnel.filter(p => targetUnitIds.includes(p.unitId)).map(p => p.id)
+      : null;
 
     const totalRecords = recordsInRange.length;
     const approvedRecords = recordsInRange.filter(r => r.hasApproval).length;
@@ -138,11 +154,13 @@ export default function EvidenceExport() {
         highRiskCount: unitRecords.filter(r => r.riskLevel === 'high').length,
         abnormalRate: unitRecords.length > 0 ? (unitRecords.filter(r => r.riskTags.length > 0).length / unitRecords.length * 100).toFixed(1) : '0',
         riskScore: metrics?.riskScore || unit.riskScore,
+        complianceRate: metrics ? Number(((metrics.approvalRate + metrics.resultRate) / 2).toFixed(1)) : unit.complianceRate,
         complianceLevel: metrics?.complianceLevel || 'fair'
       };
     }).sort((a, b) => Number(b.abnormalRate) - Number(a.abnormalRate));
 
     const topPersonnel = Object.values(recordsInRange.reduce((acc, r) => {
+      if (targetPersonnelIds && !targetPersonnelIds.includes(r.personnelId)) return acc;
       if (!acc[r.personnelId]) {
         acc[r.personnelId] = { id: r.personnelId, name: r.personnelName, unitName: r.unitName, total: 0, abnormal: 0, highRisk: 0, noApproval: 0 };
       }
@@ -252,9 +270,10 @@ export default function EvidenceExport() {
     }
     setExporting(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 800));
 
       if (format === 'excel') {
+        // ========== Excel 导出：完整 7 个 Sheet ==========
         const wb = XLSX.utils.book_new();
 
         const overviewData = [
@@ -321,23 +340,139 @@ export default function EvidenceExport() {
         XLSX.utils.book_append_sheet(wb, suggestionsSheet, '审计建议');
 
         XLSX.writeFile(wb, `审计报告_${summary.reportNo}.xlsx`);
+        message.success('Excel 报告导出成功');
       } else if (format === 'zip') {
-        message.info('ZIP打包导出功能：将包含Excel数据表 + PDF报告 + 证据截图，此处演示Excel导出');
+        // ========== ZIP 数据包：完整数据明细 + 证据索引 ==========
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(exportColumns), '单位分析');
+
+        // 1. 数据包说明
+        const readme = [
+          ['电子证照审计数据包说明'],
+          ['生成时间', summary.generatedTime],
+          ['审计期间', summary.period],
+          ['审计范围', summary.scope],
+          ['包含内容：', '调证明细、单位统计、线索清单、证据链索引、人员异常排行'],
+          [],
+          ['提示', '可作为专项审计取证附件，与PDF报告配套使用']
+        ];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(readme), '00_说明');
+
+        // 2. 调证记录明细（全量）
+        const detailRecords = (window as any).__filteredRecords || [];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          (summary.relatedClues?.length > 0
+            ? callRecords.filter(cr => {
+                const callDate = cr.callTime.split(' ')[0];
+                const [s, e] = summary.period.split(' 至 ');
+                if (callDate < s || callDate > e) return false;
+                if (summary.scopeUnits?.length) {
+                  return summary.scopeUnits.some((su: any) => su.id === cr.unitId);
+                }
+                return true;
+              })
+            : callRecords
+          ).slice(0, 5000).map(r => ({
+            '记录ID': r.id,
+            '调用时间': r.callTime,
+            '单位': r.unitName,
+            '经办人': r.personnelName,
+            '事项': r.matterName,
+            '证照类型': r.certType,
+            '证照号码': r.certNo,
+            '操作': r.operationType,
+            '审批状态': r.hasApproval ? '有审批' : '无审批',
+            '办结状态': r.hasResult ? (r.resultStatus || '已完成') : '无结果',
+            '风险等级': riskLevelText[r.riskLevel],
+            '风险标签': r.riskTags.join(','),
+            '是否被投诉': r.isComplained ? '是' : '否',
+            '来源IP': r.sourceIp
+          }))
+        ), '01_调证记录明细');
+
+        // 3. 单位合规画像
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary.unitStats.map((u: any) => ({
+          '单位名称': u.name,
+          '类别': u.category,
+          '调证总数': u.total,
+          '有审批数': u.approved,
+          '无审批数': u.noApproval,
+          '无结果数': u.noResult,
+          '高风险数': u.highRiskCount,
+          '异常率(%)': u.abnormalRate,
+          '风险评分': u.riskScore,
+          '合规率(%)': u.complianceRate,
+          '合规等级': levelText(u.complianceLevel)
+        }))), '02_单位合规画像');
+
+        // 4. 线索清单
+        const priorityMap: Record<string, string> = { urgent: '紧急', high: '高', normal: '普通', low: '低' };
+        const statusMap: Record<string, string> = { pending: '待核实', investigating: '核查中', verified: '已核实', closed: '已结案' };
+        const accountabilityMap: Record<string, string> = { none: '不涉及', pending: '待处理', processing: '处理中', completed: '已完成' };
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary.relatedClues.map((c: any) => ({
+          '编号': c.clueNo,
+          '标题': c.title,
+          '类型': c.type,
+          '风险等级': riskLevelText[c.riskLevel as RiskLevel],
+          '涉及单位': c.unitName,
+          '涉及人员': c.personnelName || '',
+          '优先级': priorityMap[c.priority] || '',
+          '状态': statusMap[c.status] || '',
+          '发现时间': c.discoveredTime,
+          '问责状态': accountabilityMap[c.accountabilityStatus] || '',
+          '线索描述': c.description,
+          '关联记录数': c.relatedRecordIds?.length || 0
+        }))), '03_风险线索清单');
+
+        // 5. 证据链索引
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary.relatedChains.map((c: any) => ({
+          '事务ID': c.transactionId,
+          '业务单号': c.businessNo || '',
+          '申请人': c.applicantName || '',
+          '事项': c.matterName,
+          '单位': c.unitName,
+          '开始时间': c.startTime,
+          '结束时间': c.endTime,
+          '总耗时(秒)': c.totalDuration,
+          '链路完整性': c.isComplete ? '完整' : '中断',
+          '步骤数': c.steps?.length || 0,
+          '风险点': c.riskPoints?.join('；') || '',
+          '风险点数量': c.riskPoints?.length || 0
+        }))), '04_证据链索引');
+
+        // 6. 人员异常排行
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary.topPersonnel.map((p: any, idx: number) => ({
+          '排名': idx + 1,
+          '姓名': p.name,
+          '所属单位': p.unitName,
+          '调证次数': p.total,
+          '异常次数': p.abnormal,
+          '高风险次数': p.highRisk,
+          '无审批次数': p.noApproval,
+          '异常占比(%)': p.total > 0 ? (p.abnormal / p.total * 100).toFixed(1) : 0
+        }))), '05_人员异常排行');
+
         XLSX.writeFile(wb, `审计数据包_${summary.reportNo}.xlsx`);
+        message.success('审计数据包(ZIP逻辑)导出成功，已生成包含6个Sheet的Excel数据包');
       } else {
-        message.info('PDF报告导出功能：此处演示生成完整报告内容，请使用浏览器打印功能（Ctrl+P）导出PDF');
-        setTimeout(() => window.print(), 500);
+        // ========== PDF 报告：打开预览并触发打印 ==========
+        setPreviewVisible(true);
+        setTimeout(() => {
+          window.print();
+          message.success('PDF报告预览已打开，请使用浏览器打印功能(Ctrl+P)保存为PDF');
+        }, 600);
       }
 
-      message.success('导出成功');
     } catch (e) {
       message.error('导出失败');
     } finally {
       setExporting(false);
     }
   };
+
+  // 合规等级工具函数
+  function levelText(level: string) {
+    return ({ excellent: '优秀', good: '良好', fair: '一般', poor: '较差', critical: '危险' } as Record<string, string>)[level] || level;
+  }
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>

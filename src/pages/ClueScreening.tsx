@@ -137,19 +137,75 @@ export default function ClueScreening() {
     });
     const topPersonnel = Object.values(personnelAbnormal).sort((a, b) => b.abnormal - a.abnormal).slice(0, 5);
 
-    const sameCertMultiDept = callRecords.reduce((acc, r) => {
-      const key = r.certNo;
-      if (!acc[key]) acc[key] = { certNo: r.certNo, certType: r.certType, depts: new Set<string>(), calls: 0, times: [] as string[] };
-      acc[key].depts.add(r.unitName);
-      acc[key].calls++;
-      acc[key].times.push(r.callTime);
+    // 时间窗口：2 小时内的连续查询视为一组
+    const WINDOW_MS = 2 * 60 * 60 * 1000;
+
+    // 按证照号分组
+    const recordsByCert = callRecords.reduce((acc, r) => {
+      if (!acc[r.certNo]) acc[r.certNo] = [];
+      acc[r.certNo].push(r);
       return acc;
-    }, {} as Record<string, { certNo: string; certType: string; depts: Set<string>; calls: number; times: string[] }>);
-    const multiDeptCertList = Object.values(sameCertMultiDept)
-      .filter(x => x.depts.size >= 2)
-      .sort((a, b) => b.calls - a.calls)
-      .slice(0, 5)
-      .map(x => ({ ...x, deptCount: x.depts.size, depts: Array.from(x.depts) }));
+    }, {} as Record<string, CallRecord[]>);
+
+    // 同一张证照上，用滑窗找出多部门短时连续查询
+    const multiDeptGroups: Array<{
+      certNo: string;
+      certType: string;
+      holderName: string;
+      deptCount: number;
+      deptNames: string[];
+      totalCalls: number;
+      firstTime: string;
+      lastTime: string;
+      timeSpanMinutes: number;
+      personnelInvolved: string[];
+    }> = [];
+
+    Object.entries(recordsByCert).forEach(([certNo, list]) => {
+      if (list.length < 2) return;
+      // 按时间排序
+      const sorted = list.sort((a, b) => new Date(a.callTime).getTime() - new Date(b.callTime).getTime());
+      const n = sorted.length;
+
+      // 滑窗 [left, right] 保证时间跨度 <= WINDOW_MS
+      let left = 0;
+      // 记录已经被计入某个组的右端，避免重复
+      let lastGroupedRight = -1;
+
+      for (let right = 0; right < n; right++) {
+        while (left < right && new Date(sorted[right].callTime).getTime() - new Date(sorted[left].callTime).getTime() > WINDOW_MS) {
+          left++;
+        }
+        // 检查窗口内的部门去重数量
+        const window = sorted.slice(left, right + 1);
+        const unitSet = new Set(window.map(r => r.unitName));
+        if (unitSet.size >= 2 && right >= lastGroupedRight + 2) {
+          // 找到一个多部门短时查询组
+          const first = window[0];
+          const last = window[window.length - 1];
+          const t1 = new Date(first.callTime).getTime();
+          const t2 = new Date(last.callTime).getTime();
+          multiDeptGroups.push({
+            certNo,
+            certType: first.certType,
+            holderName: first.holderName || '-',
+            deptCount: unitSet.size,
+            deptNames: Array.from(unitSet),
+            totalCalls: window.length,
+            firstTime: first.callTime,
+            lastTime: last.callTime,
+            timeSpanMinutes: Math.max(1, Math.round((t2 - t1) / 60000)),
+            personnelInvolved: Array.from(new Set(window.map(r => r.personnelName)))
+          });
+          lastGroupedRight = right;
+        }
+      }
+    });
+
+    // 按调用次数排序取 TOP5
+    const multiDeptCertList = multiDeptGroups
+      .sort((a, b) => b.totalCalls - a.totalCalls || a.timeSpanMinutes - b.timeSpanMinutes)
+      .slice(0, 5);
 
     const highFreqNoResult = Object.values(callRecords.reduce((acc, r) => {
       const key = r.personnelId;
@@ -298,7 +354,7 @@ export default function ClueScreening() {
             title={
               <Space>
                 <TeamOutlined style={{ color: '#ff4d4f' }} />
-                多部门短时连续查询同一证照（TOP5）
+                多部门短时连续查询同一证照（TOP5，2小时窗口）
               </Space>
             }
             extra={<Tag color="red">重点关注</Tag>}
@@ -309,20 +365,25 @@ export default function ClueScreening() {
               locale={{ emptyText: '暂未发现此类异常' }}
               renderItem={(item, idx) => (
                 <List.Item>
-                  <Space style={{ width: '100%', justifyContent: 'space-between' }} align="start">
-                    <Space direction="vertical" size={2}>
+                  <Space style={{ width: '100%', justifyContent: 'space-between' }} align="start" size={8} wrap>
+                    <Space direction="vertical" size={2} style={{ maxWidth: '55%' }}>
                       <Space>
                         <Tag color="red">#{idx + 1}</Tag>
                         <Text strong>{item.certType}</Text>
                         <Text type="secondary" copyable>{item.certNo.slice(0, 6)}****{item.certNo.slice(-4)}</Text>
+                        <Text type="secondary">· {item.holderName}</Text>
                       </Space>
                       <Space size={[4, 4]} wrap>
-                        {item.depts.map(d => <Tag key={d} color="purple">{d}</Tag>)}
+                        {item.deptNames.map(d => <Tag key={d} color="purple" style={{ margin: 0 }}>{d}</Tag>)}
                       </Space>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        首次：{item.firstTime} ～ 末次：{item.lastTime}
+                      </Text>
                     </Space>
                     <Space direction="vertical" size={2} align="end">
-                      <Text strong style={{ color: '#ff4d4f' }}>{item.deptCount}个部门</Text>
-                      <Text type="secondary">共查询{item.calls}次</Text>
+                      <Text strong style={{ color: '#ff4d4f' }}>{item.deptCount}个部门 · 共查询{item.totalCalls}次</Text>
+                      <Text type="secondary">时间跨度：{item.timeSpanMinutes >= 60 ? `${Math.floor(item.timeSpanMinutes / 60)}时${item.timeSpanMinutes % 60}分` : `${item.timeSpanMinutes}分钟`}</Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>涉及人员：{item.personnelInvolved.slice(0, 2).join('、')}{item.personnelInvolved.length > 2 ? ` 等${item.personnelInvolved.length}人` : ''}</Text>
                     </Space>
                   </Space>
                 </List.Item>

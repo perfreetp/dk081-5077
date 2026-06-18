@@ -417,7 +417,7 @@ export default function Dashboard() {
             <Table
               size="small"
               pagination={false}
-              dataSource={units.slice(0, 5)}
+              dataSource={units}
               rowKey="id"
               columns={[
                 { title: '单位', dataIndex: 'name', key: 'name', ellipsis: true },

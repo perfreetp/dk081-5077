@@ -92,7 +92,7 @@ const accountabilityConfig: Record<AccountabilityStatus, { text: string; color: 
 
 export default function CaseManagement() {
   const { message } = App.useApp();
-  const { riskClues, updateRiskClue, callRecords, units, personnel } = useAuditStore();
+  const { riskClues, updateRiskClue, addRiskClue, callRecords, units, personnel } = useAuditStore();
 
   const [searchText, setSearchText] = useState('');
   const [filterStatus, setFilterStatus] = useState<CaseStatus | undefined>();
@@ -263,11 +263,32 @@ export default function CaseManagement() {
   ];
 
   const handleEditSubmit = (values: any) => {
+    const unitName = units.find(u => u.id === values.unitId)?.name || values.unitName;
+    const personnelName = values.personnelId
+      ? (personnel.find(p => p.id === values.personnelId)?.name || values.personnelName)
+      : values.personnelName;
+
+    const payload: any = {
+      ...values,
+      unitName,
+      personnelName
+    };
+
     if (selectedClue) {
-      updateRiskClue(selectedClue.id, { ...values });
+      updateRiskClue(selectedClue.id, payload);
       message.success('案例信息更新成功');
-      setEditVisible(false);
+    } else {
+      addRiskClue({
+        ...payload,
+        discoveredTime: payload.discoveredTime || dayjs().format('YYYY-MM-DD HH:mm:ss'),
+        discoveredBy: payload.discoveredBy || '人工登记',
+        status: payload.status || 'pending',
+        priority: payload.priority || 'normal',
+        accountabilityStatus: payload.accountabilityStatus || 'none'
+      });
+      message.success('线索登记成功，已加入案例库');
     }
+    setEditVisible(false);
   };
 
   const handleConclusionSubmit = (values: any) => {

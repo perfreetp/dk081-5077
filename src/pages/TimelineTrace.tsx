@@ -174,20 +174,71 @@ export default function TimelineTrace() {
   ];
 
   const sameCertTimeline = useMemo(() => {
+    const WINDOW_MS = 2 * 60 * 60 * 1000; // 2小时窗口
     const certMap: Record<string, CallRecord[]> = {};
     callRecords.forEach(r => {
       if (!certMap[r.certNo]) certMap[r.certNo] = [];
       certMap[r.certNo].push(r);
     });
-    return Object.entries(certMap)
-      .filter(([_, list]) => list.length >= 3)
-      .map(([certNo, list]) => ({
-        certNo,
-        certType: list[0].certType,
-        holderName: list[0].holderName,
-        records: list.sort((a, b) => new Date(a.callTime).getTime() - new Date(b.callTime).getTime())
-      }))
-      .sort((a, b) => b.records.length - a.records.length)
+
+    // 对每张证照，用滑窗找出多部门短时连续查询的分组
+    const groups: Array<{
+      groupKey: string;
+      certNo: string;
+      certType: string;
+      holderName: string;
+      records: CallRecord[];
+      deptCount: number;
+      personnelCount: number;
+      firstTime: string;
+      lastTime: string;
+      timeSpanMinutes: number;
+      deptNames: string[];
+    }> = [];
+
+    let groupIdx = 0;
+    Object.entries(certMap).forEach(([certNo, list]) => {
+      if (list.length < 2) return;
+      const sorted = list.sort((a, b) => new Date(a.callTime).getTime() - new Date(b.callTime).getTime());
+      const n = sorted.length;
+      let left = 0;
+      let lastGroupedRight = -1;
+
+      for (let right = 0; right < n; right++) {
+        while (left < right && new Date(sorted[right].callTime).getTime() - new Date(sorted[left].callTime).getTime() > WINDOW_MS) {
+          left++;
+        }
+        const window = sorted.slice(left, right + 1);
+        const unitSet = new Set(window.map(r => r.unitName));
+        // 窗口内部门数 >= 2 或 调用次数 >= 3 视为一组
+        if ((unitSet.size >= 2 || window.length >= 3) && right >= lastGroupedRight + 1) {
+          const t1 = new Date(window[0].callTime).getTime();
+          const t2 = new Date(window[window.length - 1].callTime).getTime();
+          groups.push({
+            groupKey: `${certNo}-${groupIdx++}`,
+            certNo,
+            certType: window[0].certType,
+            holderName: window[0].holderName || '-',
+            records: window,
+            deptCount: unitSet.size,
+            personnelCount: new Set(window.map(r => r.personnelName)).size,
+            firstTime: window[0].callTime,
+            lastTime: window[window.length - 1].callTime,
+            timeSpanMinutes: Math.max(1, Math.round((t2 - t1) / 60000)),
+            deptNames: Array.from(unitSet)
+          });
+          lastGroupedRight = right;
+        }
+      }
+    });
+
+    return groups
+      .sort((a, b) => {
+        // 多部门 + 调用次数多的排前
+        const scoreA = (a.deptCount >= 2 ? 100 : 0) + a.records.length * 10;
+        const scoreB = (b.deptCount >= 2 ? 100 : 0) + b.records.length * 10;
+        return scoreB - scoreA;
+      })
       .slice(0, 10);
   }, [callRecords]);
 
@@ -421,14 +472,11 @@ export default function TimelineTrace() {
 
             <Row gutter={[16, 16]}>
               {sameCertTimeline.map((item) => {
-                const deptCount = new Set(item.records.map(r => r.unitName)).size;
-                const personnelCount = new Set(item.records.map(r => r.personnelName)).size;
-                const timeSpan = dayjs(item.records[item.records.length - 1].callTime).diff(dayjs(item.records[0].callTime), 'minute');
                 const hasHighRisk = item.records.some(r => r.riskLevel === 'high');
-                const multiDept = deptCount >= 2;
+                const multiDept = item.deptCount >= 2;
 
                 return (
-                  <Col xs={24} lg={12} key={item.certNo}>
+                  <Col xs={24} lg={12} key={item.groupKey}>
                     <Card
                       size="small"
                       title={
@@ -448,10 +496,21 @@ export default function TimelineTrace() {
                     >
                       <Space direction="vertical" size={8} style={{ width: '100%' }}>
                         <Space wrap size={[8, 4]}>
-                          <Tag color="blue">{deptCount} 个部门</Tag>
-                          <Tag color="purple">{personnelCount} 名经办人</Tag>
-                          <Tag color="cyan">时间跨度：{timeSpan} 分钟</Tag>
+                          <Tag color="blue">{item.deptCount} 个部门</Tag>
+                          <Tag color="purple">{item.personnelCount} 名经办人</Tag>
+                          <Tag color="cyan">时间跨度：{item.timeSpanMinutes >= 60 ? `${Math.floor(item.timeSpanMinutes / 60)}时${item.timeSpanMinutes % 60}分` : `${item.timeSpanMinutes}分钟`}</Tag>
                         </Space>
+                        <Space wrap size={[4, 4]} style={{ fontSize: 12 }}>
+                          <Text type="secondary">首次查询：{item.firstTime}</Text>
+                          <Divider type="vertical" />
+                          <Text type="secondary">末次查询：{item.lastTime}</Text>
+                        </Space>
+                        {multiDept && (
+                          <Space wrap size={[4, 4]}>
+                            <Text type="secondary" style={{ fontSize: 12 }}>涉及部门：</Text>
+                            {item.deptNames.map(d => <Tag key={d} color="purple" style={{ fontSize: 12 }}>{d}</Tag>)}
+                          </Space>
+                        )}
 
                         <Divider style={{ margin: '8px 0' }} />
 

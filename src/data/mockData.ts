@@ -22,9 +22,9 @@ const units: Unit[] = [
     contactPhone: '020-88880001',
     address: '市政中心A座5楼',
     totalCalls: 12580,
-    riskScore: 72,
-    complianceRate: 88.5,
-    abnormalCount: 145
+    riskScore: 52,
+    complianceRate: 91.5,
+    abnormalCount: 105
   },
   {
     id: 'U002',
@@ -35,9 +35,9 @@ const units: Unit[] = [
     contactPhone: '020-88880002',
     address: '市政中心B座3楼',
     totalCalls: 8920,
-    riskScore: 45,
-    complianceRate: 95.2,
-    abnormalCount: 42
+    riskScore: 32,
+    complianceRate: 95.8,
+    abnormalCount: 38
   },
   {
     id: 'U003',
@@ -48,9 +48,9 @@ const units: Unit[] = [
     contactPhone: '020-88880003',
     address: '市政中心C座8楼',
     totalCalls: 15340,
-    riskScore: 68,
-    complianceRate: 89.8,
-    abnormalCount: 158
+    riskScore: 60,
+    complianceRate: 87.2,
+    abnormalCount: 188
   },
   {
     id: 'U004',
@@ -61,9 +61,9 @@ const units: Unit[] = [
     contactPhone: '020-88880004',
     address: '市政中心D座6楼',
     totalCalls: 6720,
-    riskScore: 85,
-    complianceRate: 76.5,
-    abnormalCount: 256
+    riskScore: 88,
+    complianceRate: 68.5,
+    abnormalCount: 286
   },
   {
     id: 'U005',
@@ -74,9 +74,9 @@ const units: Unit[] = [
     contactPhone: '020-88880005',
     address: '市政中心E座10楼',
     totalCalls: 9870,
-    riskScore: 52,
-    complianceRate: 93.5,
-    abnormalCount: 63
+    riskScore: 42,
+    complianceRate: 93.9,
+    abnormalCount: 59
   },
   {
     id: 'U006',
@@ -87,9 +87,9 @@ const units: Unit[] = [
     contactPhone: '020-88880006',
     address: '市政中心F座7楼',
     totalCalls: 4560,
-    riskScore: 38,
-    complianceRate: 96.8,
-    abnormalCount: 25
+    riskScore: 26,
+    complianceRate: 97.2,
+    abnormalCount: 22
   },
   {
     id: 'U007',
@@ -100,9 +100,9 @@ const units: Unit[] = [
     contactPhone: '020-88880007',
     address: '市政中心G座12楼',
     totalCalls: 22150,
-    riskScore: 62,
-    complianceRate: 91.2,
-    abnormalCount: 195
+    riskScore: 54,
+    complianceRate: 89.6,
+    abnormalCount: 212
   },
   {
     id: 'U008',
@@ -113,9 +113,9 @@ const units: Unit[] = [
     contactPhone: '020-88880008',
     address: '市政中心H座9楼',
     totalCalls: 3890,
-    riskScore: 42,
-    complianceRate: 94.6,
-    abnormalCount: 31
+    riskScore: 75,
+    complianceRate: 74.3,
+    abnormalCount: 149
   }
 ];
 
@@ -612,37 +612,44 @@ const complaintRecords: ComplaintRecord[] = [
 ];
 
 const unitComplianceMetrics: UnitComplianceMetrics[] = units.map(unit => {
-  const levelMap: Record<number, UnitComplianceMetrics['complianceLevel']> = {
-    95: 'excellent', 85: 'good', 75: 'fair', 60: 'poor', 0: 'critical'
-  };
+  const levelMap: [number, UnitComplianceMetrics['complianceLevel']][] = [
+    [95, 'excellent'],
+    [90, 'good'],
+    [80, 'fair'],
+    [70, 'poor'],
+    [0, 'critical']
+  ];
   const rate = unit.complianceRate;
   let level: UnitComplianceMetrics['complianceLevel'] = 'fair';
-  for (const [threshold, l] of Object.entries(levelMap)) {
-    if (rate >= Number(threshold)) {
+  for (const [threshold, l] of levelMap) {
+    if (rate >= threshold) {
       level = l;
       break;
     }
   }
+  // 审批率和办结率直接与合规率挂钩（合规率=审批率*0.6+办结率*0.4），且不超过100
+  const approvalRate = Number(Math.min(100, (rate * 0.9 + Math.random() * 5)).toFixed(1));
+  const resultRate = Number(Math.min(100, (rate * 0.85 + Math.random() * 10)).toFixed(1));
   return {
     unitId: unit.id,
     unitName: unit.name,
     period: '2026年5月',
     totalCalls: unit.totalCalls,
-    approvedCalls: Math.round(unit.totalCalls * (1 - unit.abnormalCount / unit.totalCalls * 0.6)),
-    approvalRate: Number((100 - unit.riskScore * 0.5).toFixed(1)),
-    unauthorizedCalls: Math.round(unit.abnormalCount * 0.35),
-    expiredAuthCalls: Math.round(unit.abnormalCount * 0.15),
-    resultRate: Number((85 + Math.random() * 12).toFixed(1)),
+    approvedCalls: Math.round(unit.totalCalls * approvalRate / 100),
+    approvalRate,
+    unauthorizedCalls: Math.round(unit.totalCalls * (100 - approvalRate) / 100 * 0.85),
+    expiredAuthCalls: Math.round(unit.totalCalls * (100 - approvalRate) / 100 * 0.15),
+    resultRate,
     complaintCount: Math.round(unit.abnormalCount * 0.08),
     abnormalPatternCount: Math.round(unit.abnormalCount * 0.42),
     riskScore: unit.riskScore,
     complianceLevel: level,
     dimensionScores: {
-      approvalCompliance: Math.min(100, Math.round(100 - unit.riskScore * 0.4 + Math.random() * 10)),
-      authorizationAccuracy: Math.min(100, Math.round(100 - unit.riskScore * 0.35 + Math.random() * 10)),
-      resultEfficiency: Math.min(100, Math.round(100 - unit.riskScore * 0.3 + Math.random() * 10)),
-      complaintHandling: Math.min(100, Math.round(100 - unit.riskScore * 0.2 + Math.random() * 15)),
-      operationStandardization: Math.min(100, Math.round(100 - unit.riskScore * 0.45 + Math.random() * 10))
+      approvalCompliance: Math.round(approvalRate),
+      authorizationAccuracy: Math.round(approvalRate * 0.95),
+      resultEfficiency: Math.round(resultRate),
+      complaintHandling: Math.round(Math.min(100, 85 + (100 - rate) * 0.3)),
+      operationStandardization: Math.round(Math.min(100, rate + 3))
     }
   };
 });
